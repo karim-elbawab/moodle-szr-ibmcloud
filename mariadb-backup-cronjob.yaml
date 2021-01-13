@@ -1,0 +1,38 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: mariadb-backup-cronjob
+  namespace: moodle
+spec:
+  schedule: "0 0 * * *" # Set your schedule
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - env:
+            - name: MOODLE_DATABASE_HOST
+              value: moodle-mariadb
+            - name: MARIADB_USER
+              value: bn_moodle
+            - name: MARIADB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: mariadb-password
+                  name: moodle-mariadb
+            image: docker.io/bitnami/mariadb:10.5.8-debian-10-r21
+            name: mariadb
+            securityContext:
+              runAsUser: 1001
+            volumeMounts:
+            - mountPath: /backups
+              name: mariadb-backup
+            command: ["/bin/bash","-c"]
+            args: # Update the task
+            - mysqldump --all-databases --single-transaction --quick --lock-tables=false > /backups/$(date "+%Y_%m_%d_%T")-backup.sql -u $MARIADB_USER -p$MARIADB_PASSWORD -h $MOODLE_DATABASE_HOST;
+          volumes:
+          - name: mariadb-backup
+            persistentVolumeClaim:
+              claimName: mariadb-backup
+          restartPolicy: OnFailure

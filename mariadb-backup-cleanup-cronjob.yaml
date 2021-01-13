@@ -1,0 +1,28 @@
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: mariadb-backup-cleanup-cronjob
+  namespace: moodle
+spec:
+  schedule: "0 0 * * *" # Set your schedule
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - image: debian:9
+            name: debian
+            securityContext:
+              runAsUser: 1001
+            volumeMounts:
+            - mountPath: /backups
+              name: mariadb-backup
+            command: ["/bin/bash","-c"]
+            args: # Update the task
+            - find /backups/ -name '*.sql' -type f -mtime +7 -exec rm {} \;
+          volumes:
+          - name: mariadb-backup
+            persistentVolumeClaim:
+              claimName: mariadb-backup
+          restartPolicy: OnFailure

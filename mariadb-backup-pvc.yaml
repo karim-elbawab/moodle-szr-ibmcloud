@@ -1,0 +1,18 @@
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: mariadb-backup
+  namespace: moodle
+  annotations:
+    ibm.io/auto-create-bucket: "true"
+    ibm.io/auto-delete-bucket: "true"
+    ibm.io/bucket: ""
+    ibm.io/secret-name: "cos-write-access" # To check secrets in your cluster: kubectl get secrets -n <namespace_name>
+    ibm.io/endpoint: "https://s3.eu-gb.cloud-object-storage.appdomain.cloud" # To check the available endpoints, check the Endpoints tap in the object storage instance
+spec:
+  accessModes:
+    - ReadWriteMany # Availabe options: ReadWriteMany, ReadWriteOnce, ReadOnlyMany
+  resources:
+    requests:
+      storage: 80Gi # Enter the required storage
+  storageClassName: ibmc-s3fs-vault-regional # To check the available storage classes in your cluster: kubectl get storageclass  
