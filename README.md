@@ -45,23 +45,21 @@ This section shows step by step how to implement the full solution starting by c
 -	Domain name.
 
 ### Steps
-- [Moodle Single-Zone Region Deployment on Kubernetes Cluster in IBM Cloud](#moodle-single-zone-region-deployment-on-kubernetes-cluster-in-ibm-cloud)
-  - [Solution Details](#solution-details)
-  - [Components](#components)
-  - [| **IBM Cloud Monitoring with Sysdig** | Graduated Tier – 3 nodes and 2 containers | It is used for monitoring your cluster. |](#-ibm-cloud-monitoring-with-sysdig--graduated-tier--3-nodes-and-2-containers--it-is-used-for-monitoring-your-cluster-)
-  - [Architecture](#architecture)
-  - [Implementation](#implementation)
-    - [Prerequisite](#prerequisite)
-    - [Steps](#steps)
-    - [1. Setup Command Line Tools](#1-setup-command-line-tools)
-    - [2. Create Your Virtual Private Cloud (VPC)](#2-create-your-virtual-private-cloud-vpc)
-    - [3. Provision Kubernetes Cluster](#3-provision-kubernetes-cluster)
-    - [4. Deploy Bitnami Moodle Helm Chart](#4-deploy-bitnami-moodle-helm-chart)
-    - [5. Configure Object Storage StorageClasses in the Kubernetes Cluster](#5-configure-object-storage-storageclasses-in-the-kubernetes-cluster)
-    - [6. Configure the database backups](#6-configure-the-database-backups)
-    - [7. Configure the Cloud Internet Services](#7-configure-the-cloud-internet-services)
-    - [8. Enable Logging and Monitoring Services](#8-enable-logging-and-monitoring-services)
-  - [References](#references)
+[1. Setup Command Line Tools](#1-setup-command-line-tools)
+
+[2. Create Your Virtual Private Cloud (VPC)](#2-create-your-virtual-private-cloud-vpc)
+
+[3. Provision Kubernetes Cluster](#3-provision-kubernetes-cluster)
+
+[4. Deploy Bitnami Moodle Helm Chart](#4-deploy-bitnami-moodle-helm-chart)
+
+[5. Configure Object Storage StorageClasses in the Kubernetes Cluster](#5-configure-object-storage-storageclasses-in-the-kubernetes-cluster)
+
+[6. Configure the database backups](#6-configure-the-database-backups)
+
+[7. Configure the Cloud Internet Services](#7-configure-the-cloud-internet-services)
+
+[8. Enable Logging and Monitoring Services](#8-enable-logging-and-monitoring-services)
 
 ### 1. Setup Command Line Tools
 1. Install IBM Cloud CLI `ibmcloud` along with IBM Cloud Kubernetes Service plug-in `ibmcloud ks`, IBM Cloud Container Registry plug-in `ibmcloud cr` and IBM Cloud Kubernetes Service observability plug-in `ibmcloud ob` by following the steps [here](https://cloud.ibm.com/docs/containers?topic=containers-cs_cli_install#cs_cli_install_steps).
@@ -135,10 +133,256 @@ This section shows step by step how to implement the full solution starting by c
 9. Download the [values.yaml](./values.yaml) file in your local machine, in the solution here will keep all the default values except the size of the persistence volumes will make it 10Gi, so will update in line 216 and 341.
     
     **Note:** Feel free to update other values in the file, you can check the full documentation from this link: https://github.com/bitnami/charts/tree/master/bitnami/moodle
+10. Start the deployment of Moodle by running the following command: `helm install moodle bitnami/moodle -f values.yaml --namespace moodle`
+    
+    **Note:** set the correct path for values.yaml file in your local machine.
+11. Moodle deployment will take some time, to verify that the deployment is done successfully, apply the following steps:
+
+    - Verify that all the pods are in Running status by running the following command: `kubectl get pods --namespace moodle -w`
+ 
+        **Note:** Wait until the status of all the pods turn into Running status and both containers have 1/1 Ready. (To exit this command, use Ctrl+C)
+    - Verify that the load balance is exposed successfully by running the following command: `kubectl get events --namespace moodle -w --field-selector involvedObject.kind=Service,involvedObject.name=moodle`
+ 
+        **Note:** Wait until you are able to see a message similar to the following message (To exit this command, use Ctrl+C):
+        > Event on cloud load balancer moodle for service moodle/moodle with UID 1da290dd-636a-45d6-b8c6-528dde484013: The VPC load balancer that routes requests to this Kubernetes LoadBalancer service is currently online/active
+    - Obtain the URL of the deployed application then check in your browser. You can get the URL by running the following command: `kubectl get svc --namespace moodle moodle --template "{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"`
+ 
+        **Important Notes**
+        - In the browser you can verify the deployment.
+        - The default Moodle admin username is user unless it was modified in values.yaml file and the password can be retrieved from the secrets by running the following commands: `kubectl get secret --namespace moodle moodle -o jsonpath="{.data.moodle-password}" | base64 –decode`.
+        - The password is randomly generated unless it was modified in values.yaml file.
+
+
 ### 5. Configure Object Storage StorageClasses in the Kubernetes Cluster
+1. Create IBM Cloud Object Storage instance by applying the following steps:
+   - Back to the browser, open the IBM Cloud Object Storage catalog page from the following link: https://cloud.ibm.com/catalog/services/cloud-object-storage
+   - Enter a **Service name** for your instance, such as *cos-backup*, select the **Standard** plan and select the same resource group as your cluster, the default is Default.
+   - Click **Create** button in the right side.
+2. Create IBM Cloud Object Storage service credentials by applying the following steps:
+
+   - After the creation of the Object Storage instance successfully, select **Service credentials** from the left menu.
+   - Click **New credential +** button. A dialog box opens.
+   - Keep the default values with the **Writer** Role and then click **Add**.
+   - Click on the newly created service credentials.
+   - Make note of the **apikey** to use OAuth2 tokens to authenticate with the IBM Cloud Object Storage service.
+3. Create a secret for the object storage service credentials by applying the following steps:
+   - Get the GUID of your IBM Cloud Object Storage service instance by running the following command: `ibmcloud resource service-instance <object-storage-name>`
+ 
+        Important Notes
+        - `<object-storage-name>` is the name of the object storage that was created in step 1 in this example was cos-backup.
+        - Make note of the GUID value.
+   - Create a Kubernetes secret to store your service credentials. When you create your secret, all values are automatically encoded to base64. In the following example the secret name is **cos-write-access**. Run the following command: `kubectl create secret generic cos-write-access --type=ibm/ibmc-s3fs --from-literal=api-key=<api_key> --from-literal=service-instance-id=<service_instance_guid>`
+ 
+        **Note:** api_key and service_instance_guid are the values that you took notes for in the previous steps.
+   - Verify that the secret is created in your namespace by running the following command: `kubectl get secret --namespace moodle`
+4. Install the IBM Cloud Object Storage plug-in by applying the following steps:
+   - Add the IBM Cloud Helm repo to your cluster by running the following command: `helm repo add ibm-helm https://raw.githubusercontent.com/IBM/charts/master/repo/ibm-helm`
+   - Download the Helm charts and unpack the charts in your current directory by running the following command: `helm fetch --untar ibm-helm/ibm-object-storage-plugin`
+   - Install the Helm plug-in by running the following command: `helm plugin install ./ibm-object-storage-plugin/helm-ibmc --namespace moodle`
+   - Install the ibm-object-storage-plugin in your cluster. When you install the plug-in, pre-defined storage classes are added to your cluster.
+
+        If you are using OS X or Linux, run the following command: `helm ibmc install ibm-object-storage-plugin ibm-helm/ibm-object-storage-plugin --set license=true`
+
+        If you are using Windows, run the following command: `helm install ibm-object-storage-plugin ./ibm-object-storage-plugin --set dcname="${DC_NAME}" --set provider="${CLUSTER_PROVIDER}" --set workerOS="${WORKER_OS}" --set platform="${PLATFORM}" --set license=true`
+        
+        **Important Notes**
+     - DC_NAME: The datacenter where your cluster is deployed. To retrieve the datacenter, run `kubectl get cm cluster-info -n kube-system -o jsonpath="{.data.cluster-config.json}{'\n'}"`. Store the datacenter value in an environment variable by running `SET DC_NAME=`. Optional Set the environment variable in Windows PowerShell by running `$env:DC_NAME=""`.
+     - CLUSTER_PROVIDER: The infrastructure provider. To retrieve this value, run `kubectl get nodes -o jsonpath="{.items[].metadata.labels.ibm-cloud.kubernetes.io\/iaas-provider}{'\n'}"`. If the output from the previous step contains `softlayer`, then set the CLUSTER_PROVIDER to "IBMC". If the output contains `gc`, `ng`, or `g2`, then set the CLUSTER_PROVIDER to "IBM-VPC". Store the infrastructure provider in an environment variable. For example: `SET CLUSTER_PROVIDER="IBM-VPC"`.
+     - WORKER_OS and PLATFORM: The operating system of the worker nodes. To retrieve these values, run `kubectl get nodes -o jsonpath="{.items[].metadata.labels.ibm-cloud.kubernetes.io\/os}{'\n'}"`. Store the operating system of the worker nodes in an environment variable. For IBM Cloud Kubernetes Service clusters, run `SET WORKER_OS="debian"` and `SET PLATFORM="k8s"`.
+   - Verify that the plug-in is installed correctly by running the following command: `kubectl get pod --namespace kube-system -o wide`
+ 
+        **Note:** In the output you should be able to see object storage pods.
+   - Verify that the storage classes are created successfully by running the following command: `kubectl get storageclass`
+ 
+        **Note:** In the output you should be able to see object storage classes.
+
 ### 6. Configure the database backups
+1. In order to store the backups for the database, an Object Storage persistence volume claim needs to be provisioned with the required storage size by applying the following steps:
+   - Download [mariadb-backup-pvc.yaml](./mariadb-backup-pvc.yaml) file in your local machine, in the solution, here the default values will provision 80GB storage using the vault regional storage class.
+
+        **Important Notes**
+        - Review mariadb-backup-pvc.yaml file and make sure that namespace, secret-name (secret-name is the name of the secret that was created previously in step 5.3) are the same ones you use in your cluster.
+        - Make sure to check the storage size, storage class name and endpoint and update their values if you would like to change the selected values.
+        - To check the available endpoints in your instances, open your Object Storage under **Storage** in this link: https://cloud.ibm.com/resources then select **Endpoints** from the left navigation menu.
+   - After reviewing mariadb-backup-pvc.yaml file, run the following command to provision in your cluster: `kubectl apply -f filepath/mariadb-backup-pvc.yaml`
+ 
+        **Note:** Provide the file path for mariadb-backup-pvc.yaml file in your local machine.
+   - Verify that your PVC is created and bound to the PV successfully by running the following command: `kubectl get pvc -n moodle`
+ 
+        **Note:** Make sure that the output has *mariadb-backup* pvc with the status **Bound**.
+2. After the setup of the PVC, a Kubernetes CronJob will be initiated in order to automate the process of retrieving regular database backups by applying the following steps:
+   - Download [mariadb-backup-cronjob.yaml](./mariadb-backup-cronjob.yaml) file in your local machine, in this solution, this cronjob will run in daily basis at midnight (Cluster region time).
+        
+        **Important Notes**
+        - Feel free to update the schedule value at line 7 to set the schedule that suits your requirement and you can validate the format of your schedule from [here](https://crontab.guru/).
+        - Make sure that the namespace is the same one that you use for your Moodle application.
+        - For the environment variables, you will find:
+          - MOODLE_DATABASE_HOST: should match MariaDB service name in this exercise, it is `moodle-mariadb`.
+          - MARIADB_USER: should match MariaDB user that was set while running Moodle helm chart, the default is `bn_moodle`. In case it was changed previously, make sure to update in the file as well.
+          - MARIADB_PASSWORD: this will be retrieved directly from the secrets that is used for MariaDB from `mariadb-password` key. This secret was automatically created by the helm chart. 
+        - This cronjob will take a full backup of the database, feel free to update the backup command at line 33 in case you want a partial backup.
+   - After reviewing mariadb-backup-cronjob.yaml file, run the following command to initiate the cronjob: `kubectl apply -f filepath/mariadb-backup-cronjob.yaml`
+ 
+        **Note:** Provide the file path for mariadb-backup-cronjob.yaml file in your local machine.
+   - Verify that your cronjob is created successfully by running the following command: `kubectl get cronjobs -n moodle -w`
+ 
+        **Important Notes**
+        - Make sure that the output has mariadb-backup-cronjob and wait until its SUSPEND value becomes **False**. (use Ctrl+C to exit this command).
+        - You can check the backup file after midnight in the newly created bucket in the Object Storage. You can access it by selecting your Object Storage under **Storage** section in this link: https://cloud.ibm.com/resources then select **Buckets** from the left navigation menu and then click on the newly created bucket to check its content.
+3. (Optional) Another Kubernetes CronJob could be initiated in order to delete the old backup files to maintain the storage size. In this solution, the cleanup job will delete the files older than 7 days, you can initiate this cronjob by running the following steps:
+   - Download [mariadb-backup-cleanup-cronjob.yaml](./mariadb-backup-cleanup-cronjob.yaml) file in your local machine, in the solution, this cronjob will run in daily basis at midnight (Cluster region time).
+
+        **Important Notes**
+       - Feel free to update the schedule value at line 7 to set the schedule that suits your requirement and you can validate the format of your schedule from here.
+       - Make sure that the namespace is the same one that you use for your Moodle application.
+       - Feel free to update the cleanup task at line 23 by increasing or decreasing the number of days, in this example it is set to 7 days.
+   - After reviewing mariadb-backup-cleanup-cronjob.yaml file, run the following command to initiate the cronjob: `kubectl apply -f filepath/mariadb-backup-cleanup-cronjob.yaml`
+ 
+        **Note:** Provide the file path for mariadb-backup-cleanup-cronjob.yaml file in your local machine.
+   - Verify that your cronjob is created successfully by running the following command: `kubectl get cronjobs -n moodle -w`
+ 
+        **Important Notes**
+        - Make sure that the output has mariadb-backup-cleanup-cronjob and wait until its SUSPEND value becomes **False**. (use Ctrl+C to exit this command).
+        - You can check the number of the backup files after 7 days and verify that the files older than 7 days get deleted successfully in the newly created bucket in the Object Storage. You can access it by selecting your Object Storage under **Storage** section in this link: https://cloud.ibm.com/resources then select **Buckets** from the left navigation menu and then click on the newly created bucket to check its content.
+
 ### 7. Configure the Cloud Internet Services
+1. Provision the Cloud Internet Services by applying the following steps:
+   - Open IBM Cloud Catalog from this link: https://cloud.ibm.com/catalog
+   - Type **Internet Services** in the search bar.
+   - Open the Internet Services, select **Standard** plan, enter **Service Name** for example *Moodle-Internet-Services* and make sure to select the same resource group for your cluster (the default resource group is **Default**).
+   - Click **Create** button in the right side.
+2. Activate your domain in the Cloud Internet Services by applying the following steps:
+   - Once the Internet Services is provisioned successfully, you will be redirected to the **Overview** page of the Internet Services. Click **Add domain** button.
+   - Enter your domain name in the input field and then click **Next**. 
+        
+        **Note**: Wait until the connection the next step is loaded, it might take some time. 
+   - (Optional) Setup your DNS records then click **Next**. 
+   - Configure NS records in your DNS provider, then Click **Next**.
+        
+        **Important Notes**
+        - After this step you can click **Cancel**.
+        - DNS might take up to 24 hours to be successfully activated, but once it is active the Domain status will change from **Pending** to **Active**.
+        - In case you would like to check the namespaces, you can check it from accessing **Reliability** page from the left navigation menu then select **DNS** tab from the top list, then you will find the name servers under **CIS name servers** section.
+3. Configure your DNS by applying the following steps:
+   - In the IBM Cloud Internet Services dashboard, use the left navigation menu to select **Reliability** > **Global Load Balancers**.
+   - Select **Health checks** tab, then click **Create +**. 
+   - Fill the form with the following values then click **Create** button:
+       - Name: moodle-service
+       - Monitor type: HTTP
+       - Port: 80
+       - Path: /
+    - Select **Origin pools** tab, and then click **Create +**.
+    - Fill the form with the following values then click **Save** button:
+       - Name: `main-poll`
+       - Origin name: `moodle-<region>-cluster`
+            
+            **Note:** It is better to include an identification of the cluster region in the origin pool, so in case you expand the origin pool with more regions in the future you can easily identify it. So here you will need to replace `<region>` by the region of your cluster. You can get the region by running the following command and get the location of your cluster: `ibmcloud ks cluster ls`
+        - Origin address: `<IngressSubdomain>`
+
+            **Note:** `<IngressSubdomain>` could be retrieved by running the following command (make sure to put the correct namespace and service name): `kubectl get svc moodle -n moodle  -o jsonpath="{.status.loadBalancer.ingress[0].hostname}"`
+        - Health check region: Select the more relevant region to the users of your application.
+        - Health check: Select the health check that was created in the previous step.
+ 
+    - Create the global load balancer with the origin pools defined in the last step. Start by selecting **Load balancers** tab and, then click **Create +**.
+    - Fill the form with the following values then click **Create** button:
+       - Name (optional): just add a name if you would like to have a prefix for your domain otherwise keep it empty.
+       - Under **Geo routes**, click Add **route**. Keep **Region** with **Default** value and under **Origin Pools** select the pool that you created in the last step then click **Add**.
+ 
+    - Verify that DNS is configured successfully by accessing your configured domain from the browser.
+4. Configure the Web Application Firewall by applying the following steps:
+   - In the IBM Cloud Internet Services dashboard, use the left navigation menu to select **Security** then select **WAF** tab from the top bar.
+   - Enable **Web Application Firewall** by turning on the switch.
+   - Select **OWASP rule set** tab. In this page, you can review OWASP Core Rule Set and individually enable or disable rules. When a rule is enabled, if an incomimg request triggers the rule, the global threat score will be increased. The Sensitivity setting will decide whether an Action is triggered for the request.
+      - Leave default OWASP rule sets as it is.
+      - Set **Sensitivity** to **Low**.
+      - Set **Action** to **Simulate** to log all the events.
+   - Click **CIS rule set**. This page shows additional rules based on common technology stacks for hosting websites.
+5. Configure the Denial of Service attacks protection by applying the following steps:
+   - In IBM Cloud Internet Services dashboard, use the left navigation menu to select **Reliability** then select **Global load balancers** tab from the top bar.
+   - Locate the GLB you created in the **Load balancers** table.
+   - Enable the Security and Performance features in the **Proxy** column.
+   - Verify that the DDoS protection is activated successfully by selecting **Overview** from the left side navigation menu and make sure that the **DDoS protection** status under **Security** section is **Active**.
+  
+        **Note:** Your GLB is now protected. An immediate benefit is that the origin IP addresses of your clusters will be hidden from the clients. If CIS detects a threat for an upcoming request, the user may see a screen like this one before being redirected to your application.
+6. Configure secured connection with HTTPS by applying the following steps:
+   - Open IBM Cloud Catalog from this link: https://cloud.ibm.com/catalog
+   - Type **Certificate Manager** in the search bar.
+   - Open the Certificate Manager, enter **Service Name** for example *Moodle-Certificate-Manager*, make sure to select the same region and resource group for your cluster (the default resource group is **Default**) and select **Public and private** in **Endpoints**.
+   - Click **Create** button on the right side.
+   - After the successful provisioning of Certificate Manager service, open another browser tab and navigate to Access(IAM) page from this link: https://cloud.ibm.com/iam/overview
+   - Open **Authorizations** from the left navigation menu.
+   - Click **Create +** button then fill the form as follows:
+     - Source service: Certificate Manager
+     - Select **Services based on attributes**
+     - Check **Source service instance**, then select the newly created service
+     - Target service: Internet Services
+     - Select **Services based on attributes**
+     - Check **Service instance**, then select your internet service instance
+     - Under **Service access**, mark **Reader** access 
+   - After filling the form, click **Authorize**.
+   - To control specific domains, assign the Manager role by using the API so that Certificate Manager can manage the DNS records for the individual domains that exist in your CIS instance. You might want to copy the command to a text file to make it easy to edit the required parameters.
+        ```curl -X POST https://iam.cloud.ibm.com/acms/v1/policies \
+        -H 'Accept: application/json' \
+        -H 'Content-Type: application/json' \
+        -H 'Authorization: Bearer <token>' \
+        -d '{ "type": "authorization", "subjects": [ { "attributes": [ { "name": "serviceName", "value": "cloudcerts" }, { "name": "accountId", "value": "<accountID>" }, { "name": "serviceInstance", "value": "<Certificate-Manager-GUID-based-instanceID>" } ] } ], "roles": [ { "role_id": "crn:v1:bluemix:public:iam::::serviceRole:Manager" } ], "resources": [ { "attributes": [ { "name": "serviceName", "value": "internet-svcs" }, { "name": "accountId", "value": "<accountID>" }, { "name": "serviceInstance", "value": "<Cloud-Internet-Services-GUID-based-instanceID>" }, { "name": "domainId", "value": "<domainID>" }, { "name": "cfgType", "value": "reliability" }, { "name": "subScope", "value": "dnsRecord" } ] } ] }'
+        ```
+        **Important Notes**
+     - `<token>`: A valid IAM token. You can find the value by using the IBM Cloud CLI: `ibmcloud iam oauth-tokens`
+     - `<accountID>`: The ID for the account where the Certificate Manager and CIS instances exist. You can find the value by navigating to **IBM Cloud** > **Manage** > **Account** > **Account Settings** or by using IBM Cloud CLI: `ibmcloud account show`
+     - `<Certificate-Manager-GUID-based-instanceID>`: The GUID-based ID for your instance of Certificate Manager. To find the value, use the IBM Cloud CLI: `ibmcloud resource service-instance "Instance name"`
+     - `<Cloud-Internet-Services-GUID-based-instanceID>`: The GUID-based ID for your instance of CIS. To find the value, use the IBM Cloud CLI: `ibmcloud resource service-instance "Instance name"`
+     - `<domainID>`: The ID of your domain as it is found in CIS. To find the value, use the IBM Cloud CLI to run: `ibmcloud cis domains -i "CIS instance name"`
+    
+        **Note:** You might need to install ibmcloud cis plugin before using the previous command, and you install it by running this command: `ibmcloud plugin install cis`
+   - Verify that the new policy with Manager role is created by refreshing the **Manage Authorization** page and checking the list of authorizations.  
+   - Close the **Manage authorizations** page and return to the newly created Certificate Manager browser tab.
+   - From **Your certificates**, click **Order** button to order a new certificate. 
+   - Click **Continue** button, under **IBM Cloud Internet Services (CIS)** section.
+   - In Certificate details tab:
+     - Enter **Name** for example *moodle-ssl-certificate*
+     - Optionally enter a description
+     - Keep the default values for the rest of the fields
+   - Move to **Domains** tab:
+     - Select your Internet Services (CIS) instances
+     - Check **Add Domain** box or **Add Wildcard** you are using a subdomain
+   - In the right side, review all the values then click **Order** button. 
+   - Your order is placed in a **Pending** state. It will take some time for the domain validation and for the Certificate Manager to verify that you own the requested domain, once the validations pass successfully the certificate will be issued and its state will change to **Valid**.
+
 ### 8. Enable Logging and Monitoring Services
+1. Configure the logging for your cluster by applying the following steps:
+   - Open IBM Cloud Catalog from this link: https://cloud.ibm.com/catalog
+   - Type **IBM Log Analysis with LogDNA** in the search bar.
+   - Fill the form as follows:
+     - Select the same region as your cluster region
+     - Select the **7 day Log Search** plan
+     - Enter **Service Name**, for example *Moodle-Logging*
+     - Select the same resource group as your cluster resource group (the default resource group is **Default**)
+   - Click **Create** button on the right side.
+   - Go to the Cluster page from this link: https://cloud.ibm.com/kubernetes/clusters and select your Cluster.
+   - In the cluster **Overview** page, click **Connect** button beside the **Logging** label.
+   - Select the region where you provisioned the Logging service and select the Logging service instance then click **Connect** button.
+ 
+        **Note:** When you create the logging configuration, a Kubernetes namespace `ibm-observe` is created and a LogDNA agent is deployed as a daemon set to all worker nodes in your cluster. This agent collects logs with the extension *.log and extensionless files that are stored in the /var/log directory of your pod from all namespaces, including kube-system. The agent then forwards the logs to the IBM Log Analysis with LogDNA service.
+   - Verify that the integration is done successfully, and that the daemon set for the LogDNA agent was created and all instances are listed as `AVAILABLE` by running the following command: `kubectl get daemonsets -n ibm-observe`
+   - You can review the pod logs that the LogDNA agent collected from your cluster by accessing the logDNA instance by clicking **Launch** button in the **Overview** page.
+2. Configure the monitoring for your cluster by applying the following steps:
+   - Open IBM Cloud Catalog from this link: https://cloud.ibm.com/catalog
+   - Type **IBM Cloud Monitoring with Sysdig** in the search bar.
+   - Fill the form as follows:
+     - Select the same region as your cluster region
+     - Select the **Graduated Tier**
+     - Enter **Service Name**, for example *Moodle-Monitoring*
+     - Select the same resource group as your cluster resource group (the default resource group is **Default**)
+   - Click **Create** button on the right side.
+   - Go to the Cluster page from this link: https://cloud.ibm.com/kubernetes/clusters and select your Cluster.
+   - In the cluster **Overview** page, click **Connect** button beside the **Monitoring** label.
+   - Select the region where you provisioned the Monitoring service and select the Monitoring service instance then click **Connect** button.
+    
+        **Note:** When you create the monitoring configuration, a Kubernetes namespace `ibm-observe` is created and a Sysdig agent is deployed as a Kubernetes daemon set to all worker nodes in your cluster. This agent collects cluster and pod metrics, such as the worker node CPU and memory usage, or the amount incoming and outgoing network traffic to your pods.
+   - Verify that the integration is done successfully, and that the daemon set for the Sysdig agent was created and all instances are listed as `AVAILABLE` by running the following command: `kubectl get daemonsets -n ibm-observe`
+ 
+   - You can review the pod and cluster metrics that the Sysdig agent collected from your cluster by accessing the Sysdig instance by clicking **Launch** button in the **Overview** page.
 
 ## References
 -	https://moodle.org/
