@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+ name: moodle-domain-ingress
+ namespace: moodle
+ annotations:
+   kubernetes.io/ingress.class: "public-iks-k8s-nginx"
+spec:
+ tls:
+ - hosts: # update the list of your domains under hosts
+   - "example.com"
+   - "*.example.com"
+   secretName: moodle-tls-secret # upate with your secret
+ rules:
+ - host: example.com # update with your domain
+   http:
+     paths:
+     - path: /
+       backend:
+         serviceName: moodle # update with your service
+         servicePort: 80
+ - host: "*.example.com" # update with your domain
+   http:
+     paths:
+     - path: /
+       backend:
+         serviceName: moodle # update with your service
+         servicePort: 80

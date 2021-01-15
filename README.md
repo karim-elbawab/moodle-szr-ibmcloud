@@ -61,6 +61,8 @@ This section shows step by step how to implement the full solution starting by c
 
 [8. Enable Logging and Monitoring Services](#8-enable-logging-and-monitoring-services)
 
+[9. (Optional) Install a new Moodle theme](#9-optional-install-a-new-moodle-theme)
+
 ### 1. Setup Command Line Tools
 1. Install IBM Cloud CLI `ibmcloud` along with IBM Cloud Kubernetes Service plug-in `ibmcloud ks`, IBM Cloud Container Registry plug-in `ibmcloud cr` and IBM Cloud Kubernetes Service observability plug-in `ibmcloud ob` by following the steps [here](https://cloud.ibm.com/docs/containers?topic=containers-cs_cli_install#cs_cli_install_steps).
 2. Download the Kubernetes CLI major.minor version that matches the Kubernetes cluster major.minor version that you plan to use. The current IBM Cloud Kubernetes Service default Kubernetes version is 1.18.14.
@@ -130,7 +132,7 @@ This section shows step by step how to implement the full solution starting by c
 6. Verify that kubectl commands run properly and that the Kubernetes context is set to your cluster by running the following command: `kubectl config current-context`
 7. Create a new namespace for Moodle deployment by running the following command: `kubectl create namespace moodle`
 8. Add bitnami-ibm repos to your helm repos by running the following command: `helm repo add bitnami-ibm https://charts.bitnami.com/ibm`
-9. Download the [values.yaml](./values.yaml) file in your local machine, in the solution here will keep all the default values except the size of the persistence volumes will make it 10Gi, so will update in line 216 and 341.
+9. Download [values.yaml](./values.yaml) file in your local machine, in the solution here will keep all the default values except the size of the persistence volumes will make it 10Gi, so will update in line 216 and 341.
     
     **Note:** Feel free to update other values in the file, you can check the full documentation from this link: https://github.com/bitnami/charts/tree/master/bitnami/moodle
 10. Start the deployment of Moodle by running the following command: `helm install moodle bitnami/moodle -f values.yaml --namespace moodle`
@@ -198,7 +200,7 @@ This section shows step by step how to implement the full solution starting by c
 
 ### 6. Configure the database backups
 1. In order to store the backups for the database, an Object Storage persistence volume claim needs to be provisioned with the required storage size by applying the following steps:
-   - Download [mariadb-backup-pvc.yaml](./mariadb-backup-pvc.yaml) file in your local machine, in the solution, here the default values will provision 80GB storage using the vault regional storage class.
+   - Download [mariadb-backup-pvc.yaml](./mariadb-backup-pvc.yaml) file in your local machine. In this exercise, the default values will provision 80GB storage using the vault regional storage class.
 
         **Important Notes**
         - Review mariadb-backup-pvc.yaml file and make sure that namespace, secret-name (secret-name is the name of the secret that was created previously in step 5.3) are the same ones you use in your cluster.
@@ -230,7 +232,7 @@ This section shows step by step how to implement the full solution starting by c
         - Make sure that the output has mariadb-backup-cronjob and wait until its SUSPEND value becomes **False**. (use Ctrl+C to exit this command).
         - You can check the backup file after midnight in the newly created bucket in the Object Storage. You can access it by selecting your Object Storage under **Storage** section in this link: https://cloud.ibm.com/resources then select **Buckets** from the left navigation menu and then click on the newly created bucket to check its content.
 3. (Optional) Another Kubernetes CronJob could be initiated in order to delete the old backup files to maintain the storage size. In this solution, the cleanup job will delete the files older than 7 days, you can initiate this cronjob by running the following steps:
-   - Download [mariadb-backup-cleanup-cronjob.yaml](./mariadb-backup-cleanup-cronjob.yaml) file in your local machine, in the solution, this cronjob will run in daily basis at midnight (Cluster region time).
+   - Download [mariadb-backup-cleanup-cronjob.yaml](./mariadb-backup-cleanup-cronjob.yaml) file in your local machine. In this exercise, the cronjob will run in daily basis at midnight (Cluster region time).
 
         **Important Notes**
        - Feel free to update the schedule value at line 7 to set the schedule that suits your requirement and you can validate the format of your schedule from here.
@@ -279,7 +281,9 @@ This section shows step by step how to implement the full solution starting by c
             **Note:** It is better to include an identification of the cluster region in the origin pool, so in case you expand the origin pool with more regions in the future you can easily identify it. So here you will need to replace `<region>` by the region of your cluster. You can get the region by running the following command and get the location of your cluster: `ibmcloud ks cluster ls`
         - Origin address: `<IngressSubdomain>`
 
-            **Note:** `<IngressSubdomain>` could be retrieved by running the following command (make sure to put the correct namespace and service name): `kubectl get svc moodle -n moodle  -o jsonpath="{.status.loadBalancer.ingress[0].hostname}"`
+            **Imortant Notes** 
+            - `<IngressSubdomain>` could be retrieved by running the following command and then get `Ingress Subdomain` value: `ibmcloud ks cluster get -c <cluster_name_or_ID>`
+            - In case you are not going to configure SSL connection, in that case you can get the ingress subdomain directly from the service by running the following command (make sure to put the correct namespace and service name): `kubectl get svc moodle -n moodle  -o jsonpath="{.status.loadBalancer.ingress[0].hostname}"`
         - Health check region: Select the more relevant region to the users of your application.
         - Health check: Select the health check that was created in the previous step.
  
@@ -288,7 +292,13 @@ This section shows step by step how to implement the full solution starting by c
        - Name (optional): just add a name if you would like to have a prefix for your domain otherwise keep it empty.
        - Under **Geo routes**, click Add **route**. Keep **Region** with **Default** value and under **Origin Pools** select the pool that you created in the last step then click **Add**.
  
-    - Verify that DNS is configured successfully by accessing your configured domain from the browser.
+    - Verify that DNS is configured successfully by checking your configured domain from the browser.
+
+      **Important Notes**
+      - In case you followed the path to configure SSL connection so in that case you will receive **404: Host not found** page until you configure the SSL in your Kubernetes Cluster (It will be configured in step 7.6).
+      - If you are not going to configure the SSL connection so in this step you will be redirected normally to your moodle application.
+      - If you choose the SSL path so make sure not to skip step 7.6.
+
 4. Configure the Web Application Firewall by applying the following steps:
    - In the IBM Cloud Internet Services dashboard, use the left navigation menu to select **Security** then select **WAF** tab from the top bar.
    - Enable **Web Application Firewall** by turning on the switch.
@@ -304,7 +314,10 @@ This section shows step by step how to implement the full solution starting by c
    - Verify that the DDoS protection is activated successfully by selecting **Overview** from the left side navigation menu and make sure that the **DDoS protection** status under **Security** section is **Active**.
   
         **Note:** Your GLB is now protected. An immediate benefit is that the origin IP addresses of your clusters will be hidden from the clients. If CIS detects a threat for an upcoming request, the user may see a screen like this one before being redirected to your application.
-6. Configure secured connection with HTTPS by applying the following steps:
+
+6. (Optional) Configure secured connection with HTTPS by applying the following steps (make sure that you followed the SSL path while setting the origin address in step 7.3):
+   - In IBM Cloud Internet Services dashboard, use the left navigation menu to select **Security** then select **Advanced** tab from the top bar.
+   - Scroll down and enable **Always use HTTPS** by clicking on the switch.
    - Open IBM Cloud Catalog from this link: https://cloud.ibm.com/catalog
    - Type **Certificate Manager** in the search bar.
    - Open the Certificate Manager, enter **Service Name** for example *Moodle-Certificate-Manager*, make sure to select the same region and resource group for your cluster (the default resource group is **Default**) and select **Public and private** in **Endpoints**.
@@ -345,9 +358,32 @@ This section shows step by step how to implement the full solution starting by c
      - Keep the default values for the rest of the fields
    - Move to **Domains** tab:
      - Select your Internet Services (CIS) instances
-     - Check **Add Domain** box or **Add Wildcard** you are using a subdomain
+     - Check **Add Domain** box or **Add Wildcard** in case you are using a subdomain
    - In the right side, review all the values then click **Order** button. 
    - Your order is placed in a **Pending** state. It will take some time for the domain validation and for the Certificate Manager to verify that you own the requested domain, once the validations pass successfully the certificate will be issued and its state will change to **Valid**.
+   - Click on the newly created certificate and take a note of **Certificate CRN** value.
+   - Open the command line tools and create ingress secret using the CRN by running the following command: `ibmcloud ks ingress secret create --cluster <cluster_name_or_ID> --cert-crn <CRN> --name <secret_name> --namespace <namespace>`
+ 
+      **Notes**
+     - `<cluster_name_or_ID>`: Use your cluster name or ID.
+     - `<CRN>`: It is the value that was obtained in the last step from the certificate manager.
+     - `<secret_name>`: Insert any value for example: *moodle-tls-secret*.
+     - `<namespace>`: Insert the same namespace used for your moodle application for example *moodle* in this exercise.
+     - **Important Note**: If you need to update your certificate later, any changes that you make to a certificate in the Certificate Manager instance that was created for your cluster are automatically reflected in the secret in your cluster. However, any changes that you make to a certificate in a different Certificate Manager instance are not automatically reflected, and you must update the secret in your cluster to pick up the certificate changes.
+    
+         `ibmcloud ks ingress secret update --name <secret_name> --cluster <cluster_name_or_ID> --namespace <namespace> [--cert-crn <certificate_crn>]`
+     - Verify that the secret is created successfully by running the following command: `kubectl get secrets <secret_name> -n moodle`
+     - Download [moodle-domain-ingress.yaml](./moodle-domain-ingress.yaml) file in your local machine. Add your domains under hosts section.
+
+         **Note:** Review moodle-domain-ingress.yaml file and make sure that namespace, secret-name (secret-name is the name of the secret that was created in the previous step) are the same ones you use in your cluster.
+
+     - After reviewing moodle-domain-ingress.yaml file, run the following command to provision in your cluster: `kubectl apply -f filepath/moodle-domain-ingress.yaml`
+ 
+         **Note:** Provide the file path for moodle-domain-ingress.yaml file in your local machine.
+
+    - Verify that your ingress is created successfully by running the following command: `kubectl get ingress -n moodle`
+ 
+   - Now the SSL should be configured successfully for your domain and you can test the accessibility for your application from the browser `https://<your-domain>`.
 
 ### 8. Enable Logging and Monitoring Services
 1. Configure the logging for your cluster by applying the following steps:
@@ -383,6 +419,23 @@ This section shows step by step how to implement the full solution starting by c
    - Verify that the integration is done successfully, and that the daemon set for the Sysdig agent was created and all instances are listed as `AVAILABLE` by running the following command: `kubectl get daemonsets -n ibm-observe`
  
    - You can review the pod and cluster metrics that the Sysdig agent collected from your cluster by accessing the Sysdig instance by clicking **Launch** button in the **Overview** page.
+ 
+### 9. (Optional) Install a new Moodle theme
+1.	You can check the available Moodle themes from the official Moodle website: https://moodle.org/plugins/?q=type:theme
+ 
+2.	Download the theme that suit your need in your local machine then unzip the content.
+
+3.	From the command line tools, get the name of the moodle pod by running the following command: `kubectl get pods -n moodle`
+ 
+4.	Copy the theme folder from your local machine to */bitnami/moodle/theme* folder in moodle pod by running the following command: `kubectl cp <theme_path_local_machine> <moodle_pod_name>:/bitnami/moodle/theme -n moodle`
+ 
+      **Important Notes** 
+      - `<theme_path_local_machine>` is the local path of the unzipped theme in your local machine and make sure to set the right folder after the unzipping.
+      - */bitnami/moodle* is the path that point to one of the persistence volumes provisioned in your cluster.
+
+5.	Verify that the file is copied successfully into your pod by running the following command and then verify the presence of the folder of the new theme: `kubectl exec <moodle_pod_name> -it -n moodle -- ls /bitnami/moodle/theme`
+ 
+
 
 ## References
 -	https://moodle.org/
@@ -395,3 +448,4 @@ This section shows step by step how to implement the full solution starting by c
 -	https://cloud.ibm.com/docs/certificate-manager?topic=certificate-manager-ordering-certificates
 -	https://cloud.ibm.com/docs/containers?topic=containers-health
 -	https://cloud.ibm.com/docs/containers?topic=containers-health-monitor
+- https://cloud.ibm.com/docs/containers?topic=containers-ingress-types#alb-comm-create
