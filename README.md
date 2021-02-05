@@ -334,7 +334,8 @@ This section shows step by step how to implement the full solution starting by c
      - Under **Service access**, mark **Reader** access 
    - After filling the form, click **Authorize**.
    - To control specific domains, assign the Manager role by using the API so that Certificate Manager can manage the DNS records for the individual domains that exist in your CIS instance. You might want to copy the command to a text file to make it easy to edit the required parameters.
-        ```curl -X POST https://iam.cloud.ibm.com/acms/v1/policies \
+        ```
+        curl -X POST https://iam.cloud.ibm.com/acms/v1/policies \
         -H 'Accept: application/json' \
         -H 'Content-Type: application/json' \
         -H 'Authorization: Bearer <token>' \
